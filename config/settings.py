@@ -61,9 +61,6 @@ RENDER_EXTERNAL_HOSTNAME = env_str('RENDER_EXTERNAL_HOSTNAME')
 if RENDER_EXTERNAL_HOSTNAME:
     ALLOWED_HOSTS.append(RENDER_EXTERNAL_HOSTNAME)
 
-# Private chat: the start screen asks for this code, so strangers who find the
-# site cannot create accounts. Empty = anyone with the link can start.
-CHAT_INVITE_CODE = env_str('CHAT_INVITE_CODE')
 
 # Origins (scheme://host:port) the Next.js frontend is served from. The browser
 # only talks to Next.js, which proxies /api, /media and /ws to this backend.
