@@ -1,6 +1,6 @@
 from django.urls import path
 
-from . import views
+from . import moderation, views
 
 urlpatterns = [
     path('auth/guest/', views.GuestView.as_view(), name='auth-guest'),
@@ -15,4 +15,9 @@ urlpatterns = [
     path('users/me/password/', views.PasswordChangeView.as_view(), name='user-password'),
     path('users/people/', views.PeopleView.as_view(), name='user-people'),
     path('users/<int:pk>/', views.UserDetailView.as_view(), name='user-detail'),
+    path('moderation/status/', moderation.StatusView.as_view(), name='moderation-status'),
+    path('moderation/unlock/', moderation.UnlockView.as_view(), name='moderation-unlock'),
+    path('moderation/lock/', moderation.LockView.as_view(), name='moderation-lock'),
+    path('moderation/users/', moderation.MemberListView.as_view(), name='moderation-users'),
+    path('moderation/users/<int:pk>/', moderation.MemberDetailView.as_view(), name='moderation-user'),
 ]

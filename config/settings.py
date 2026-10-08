@@ -61,6 +61,9 @@ RENDER_EXTERNAL_HOSTNAME = env_str('RENDER_EXTERNAL_HOSTNAME')
 if RENDER_EXTERNAL_HOSTNAME:
     ALLOWED_HOSTS.append(RENDER_EXTERNAL_HOSTNAME)
 
+# Moderation panel (the shield in the chat list). Empty = turned off.
+CHAT_ADMIN_PASSWORD = env_str('CHAT_ADMIN_PASSWORD')
+
 
 # Origins (scheme://host:port) the Next.js frontend is served from. The browser
 # only talks to Next.js, which proxies /api, /media and /ws to this backend.

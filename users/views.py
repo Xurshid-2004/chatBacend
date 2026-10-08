@@ -1,5 +1,4 @@
 import secrets
-from collections import defaultdict
 
 from django.conf import settings
 from django.contrib.auth import authenticate
@@ -19,9 +18,6 @@ from rest_framework_simplejwt.settings import api_settings as jwt_settings
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.utils import get_md5_hash_password
 
-from chats.models import Chat, ChatMember
-from chats.realtime import account_deleted
-
 from .models import User
 from .names import username_candidates
 from .presets import AVATAR_PRESETS
@@ -34,20 +30,12 @@ from .serializers import (
     StartSerializer,
     UserSerializer,
 )
+from .services import delete_account
 from .signals import profile_updated
 from .tokens import clear_auth_cookies, revoke_all_refresh_tokens, set_auth_cookies
 from .websocket import make_ticket
 
 INVALID_CREDENTIALS = 'Invalid username or password.'
-
-
-def _chat_members_of(user_id):
-    """{chat_id: [member ids]} for every chat `user_id` is in."""
-    members = defaultdict(list)
-    rows = ChatMember.objects.filter(chat__members__user_id=user_id).values_list('chat_id', 'user_id')
-    for chat_id, member_id in rows:
-        members[chat_id].append(member_id)
-    return members
 
 
 class PublicAuthView(APIView):
@@ -214,16 +202,7 @@ class ProfileView(APIView):
         user = request.user
         if user.is_staff or user.is_superuser:
             raise PermissionDenied('Admin accounts can only be deleted in the admin panel.')
-        user_id = user.pk
-        with transaction.atomic():
-            chats = {
-                chat_id: [member for member in members if member != user_id]
-                for chat_id, members in _chat_members_of(user_id).items()
-            }
-            revoke_all_refresh_tokens(user)
-            Chat.objects.filter(pk__in=chats).delete()  # messages and their files go with them
-            user.delete()
-        transaction.on_commit(lambda: account_deleted(user_id=user_id, chats=chats))
+        delete_account(user)
         return clear_auth_cookies(Response(status=status.HTTP_204_NO_CONTENT))
 
 
