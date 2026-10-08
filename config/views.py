@@ -56,8 +56,11 @@ def _check_storage():
             default_storage.exists('health-check')
     except Exception as exc:
         # S3 errors carry a safe code such as "SignatureDoesNotMatch" or "NoSuchBucket".
-        code = getattr(exc, 'response', {}).get('Error', {}).get('Code') or type(exc).__name__
-        raise RuntimeError(f'{backend}: {code}') from exc
+        response = getattr(exc, 'response', None) or {}
+        error = response.get('Error', {})
+        status = response.get('ResponseMetadata', {}).get('HTTPStatusCode')
+        detail = ' '.join(str(part) for part in (status, error.get('Code'), error.get('Message', '')[:120]) if part)
+        raise RuntimeError(f'{backend}: {detail or type(exc).__name__}') from exc
     return {'backend': backend}
 
 
