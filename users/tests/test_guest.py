@@ -1,3 +1,5 @@
+from django.test import override_settings
+
 from config.testing import ApiTestCase, create_user, make_client
 from users.models import User
 from users.names import username_base
@@ -71,3 +73,20 @@ class PeopleTests(ApiTestCase):
 
     def test_people_requires_authentication(self):
         self.assertEqual(self.client.get('/api/users/people/').status_code, 401)
+
+
+class InviteCodeTests(ApiTestCase):
+    def start(self, **data):
+        return self.client.post('/api/auth/guest/', {'name': 'Ali', 'avatar_preset': 'fox', **data}, format='json')
+
+    def test_open_without_a_code(self):
+        self.assertEqual(self.client.get('/api/auth/guest/').data, {'invite_required': False})
+        self.assertEqual(self.start().status_code, 201)
+
+    @override_settings(CHAT_INVITE_CODE='sunny-day-42')
+    def test_code_is_required_when_set(self):
+        self.assertEqual(self.client.get('/api/auth/guest/').data, {'invite_required': True})
+        self.assertIn('invite_code', self.start().data['errors'])
+        self.assertIn('invite_code', self.start(invite_code='wrong').data['errors'])
+        self.assertEqual(User.objects.count(), 0)
+        self.assertEqual(self.start(invite_code=' sunny-day-42 ').status_code, 201)

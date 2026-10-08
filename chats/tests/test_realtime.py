@@ -1,4 +1,5 @@
 import asyncio
+from unittest import mock
 from datetime import timedelta
 
 from asgiref.sync import sync_to_async
@@ -186,6 +187,35 @@ class RealtimeTests(ApiTestCase):
             event = await self.expect(socket, 'user.updated')
             self.assertEqual(event['user']['display_name'], 'Robert')
         await self.close_all()
+
+    async def open_with_ticket(self, ticket):
+        socket = WebsocketCommunicator(application, f'/ws/?ticket={ticket}', headers=[ORIGIN])
+        connected, _ = await socket.connect()
+        self.assertTrue(connected)
+        return socket
+
+    async def test_ticket_opens_the_socket_without_cookies(self):
+        response = await self.rest('alice', 'post', '/api/auth/ws-ticket/')
+        socket = await self.open_with_ticket(response.data['ticket'])
+        self.assertEqual(await self.expect(socket, 'ready'), {'type': 'ready', 'user_id': self.alice.pk})
+        self.sockets.append(socket)
+        await self.close_all()
+
+    async def test_bad_or_old_tickets_are_refused(self):
+        from django.core import signing
+
+        from users.websocket import TICKET_SALT, make_ticket
+
+        with mock.patch('django.core.signing.time.time', return_value=0):
+            expired = await sync_to_async(make_ticket)(self.alice)
+        for ticket in ('forged', expired):
+            socket = await self.open_with_ticket(ticket)
+            self.assertEqual(await socket.receive_output(timeout=2), {'type': 'websocket.close', 'code': 4401})
+
+    def test_ticket_needs_a_session(self):
+        from config.testing import make_client
+
+        self.assertEqual(make_client().post('/api/auth/ws-ticket/').status_code, 401)
 
     async def test_deleted_account_removes_the_chat_and_closes_its_sockets(self):
         alice = await self.connect(self.alice)

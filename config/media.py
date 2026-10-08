@@ -83,6 +83,54 @@ def _read_chunks(request, path, start, length):
     return _read_chunks_sync(path, start, length)
 
 
+def _open_remote(name, start, end):
+    """The bytes start..end of an object in S3-compatible storage, as a stream."""
+    storage = default_storage
+    client = storage.connection.meta.client
+    from storages.utils import clean_name
+
+    key = storage._normalize_name(clean_name(name))
+    obj = client.get_object(Bucket=storage.bucket_name, Key=key, Range=f'bytes={start}-{end}')
+    return obj['Body']
+
+
+async def _read_remote_chunks_async(name, start, end, length):
+    body = await asyncio.to_thread(_open_remote, name, start, end)
+    try:
+        remaining = length
+        while remaining > 0:
+            chunk = await asyncio.to_thread(body.read, min(CHUNK_SIZE, remaining))
+            if not chunk:
+                break
+            remaining -= len(chunk)
+            yield chunk
+    finally:
+        await asyncio.to_thread(body.close)
+
+
+def _read_remote_chunks_sync(name, start, end, length):
+    body = _open_remote(name, start, end)
+    try:
+        remaining = length
+        while remaining > 0:
+            chunk = body.read(min(CHUNK_SIZE, remaining))
+            if not chunk:
+                break
+            remaining -= len(chunk)
+            yield chunk
+    finally:
+        body.close()
+
+
+def _read_remote_chunks(request, name, start, end, length):
+    if length <= 0:
+        return iter(())
+    raw_request = getattr(request, '_request', request)
+    if isinstance(raw_request, ASGIRequest):
+        return _read_remote_chunks_async(name, start, end, length)
+    return _read_remote_chunks_sync(name, start, end, length)
+
+
 def serve_file(
     request,
     name,
@@ -95,13 +143,22 @@ def serve_file(
     """Build a response for the stored file `name` (files never change once saved)."""
     if not name:
         raise Http404('File not found.')
+    remote = getattr(default_storage, 'bucket_name', None) is not None
     try:
-        path = default_storage.path(name)
-        size = os.path.getsize(path)
+        if remote:
+            path = None
+            size = default_storage.size(name)
+        else:
+            path = default_storage.path(name)
+            size = os.path.getsize(path)
     except (OSError, SuspiciousFileOperation) as exc:
         raise Http404('File not found.') from exc
+    except Exception as exc:  # S3: missing object or bucket
+        if remote and exc.__class__.__name__ == 'ClientError':
+            raise Http404('File not found.') from exc
+        raise
 
-    etag = f'"{os.path.basename(path)}-{size}"'
+    etag = f'"{os.path.basename(name)}-{size}"'
     headers = {
         'Cache-Control': cache_control,
         'ETag': etag,
@@ -119,7 +176,7 @@ def serve_file(
         return response
 
     accel_prefix = getattr(settings, 'MEDIA_ACCEL_REDIRECT_PREFIX', '')
-    if accel_prefix:
+    if accel_prefix and not remote:
         response = HttpResponse(content_type=content_type, headers=headers)
         response['X-Accel-Redirect'] = accel_prefix.rstrip('/') + '/' + name
         return response
@@ -137,9 +194,12 @@ def serve_file(
     if request.method == 'HEAD':
         response = HttpResponse(content_type=content_type, headers=headers)
     else:
-        response = StreamingHttpResponse(
-            _read_chunks(request, path, start, length), content_type=content_type, headers=headers
+        chunks = (
+            _read_remote_chunks(request, name, start, end, length)
+            if remote
+            else _read_chunks(request, path, start, length)
         )
+        response = StreamingHttpResponse(chunks, content_type=content_type, headers=headers)
     if byte_range:
         response.status_code = 206
         response['Content-Range'] = f'bytes {start}-{end}/{size}'

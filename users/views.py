@@ -36,6 +36,7 @@ from .serializers import (
 )
 from .signals import profile_updated
 from .tokens import clear_auth_cookies, revoke_all_refresh_tokens, set_auth_cookies
+from .websocket import make_ticket
 
 INVALID_CREDENTIALS = 'Invalid username or password.'
 
@@ -82,6 +83,13 @@ class GuestView(PublicAuthView):
 
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'guest'
+
+    def get_throttles(self):
+        return super().get_throttles() if self.request.method == 'POST' else []
+
+    def get(self, request):
+        """Tells the start screen whether to ask for the invite code."""
+        return Response({'invite_required': bool(settings.CHAT_INVITE_CODE)})
 
     def post(self, request):
         serializer = StartSerializer(data=request.data)
@@ -175,6 +183,13 @@ class LogoutView(PublicAuthView):
             except TokenError:
                 pass
         return clear_auth_cookies(Response(status=status.HTTP_204_NO_CONTENT))
+
+
+class WebSocketTicketView(APIView):
+    """A one-minute pass for opening the WebSocket directly (see users/websocket.py)."""
+
+    def post(self, request):
+        return Response({'ticket': make_ticket(request.user)})
 
 
 class MeView(APIView):

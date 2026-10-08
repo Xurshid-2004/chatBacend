@@ -1,3 +1,6 @@
+import secrets
+
+from django.conf import settings
 from django.contrib.auth import password_validation
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.files.storage import default_storage
@@ -80,12 +83,24 @@ class StartSerializer(serializers.Serializer):
 
     name = serializers.CharField(max_length=40)
     avatar_preset = serializers.ChoiceField(choices=AVATAR_PRESETS, required=False)
+    invite_code = serializers.CharField(max_length=200, required=False, allow_blank=True, write_only=True)
 
     def validate_name(self, value):
         value = ' '.join(value.split())
         if not value:
             raise serializers.ValidationError('Enter your name.')
         return value
+
+    def validate_invite_code(self, value):
+        expected = settings.CHAT_INVITE_CODE
+        if expected and not secrets.compare_digest(value.strip().encode(), expected.encode()):
+            raise serializers.ValidationError('Wrong invite code.')
+        return value
+
+    def validate(self, attrs):
+        if settings.CHAT_INVITE_CODE and 'invite_code' not in attrs:
+            raise serializers.ValidationError({'invite_code': ['Enter the invite code.']})
+        return attrs
 
 
 class LoginSerializer(serializers.Serializer):

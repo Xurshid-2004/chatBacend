@@ -56,6 +56,14 @@ if not SECRET_KEY:
     )
 
 ALLOWED_HOSTS = env_list('DJANGO_ALLOWED_HOSTS', 'localhost,127.0.0.1')
+# Render sets this to the service's own *.onrender.com host name.
+RENDER_EXTERNAL_HOSTNAME = env_str('RENDER_EXTERNAL_HOSTNAME')
+if RENDER_EXTERNAL_HOSTNAME:
+    ALLOWED_HOSTS.append(RENDER_EXTERNAL_HOSTNAME)
+
+# Private chat: the start screen asks for this code, so strangers who find the
+# site cannot create accounts. Empty = anyone with the link can start.
+CHAT_INVITE_CODE = env_str('CHAT_INVITE_CODE')
 
 # Origins (scheme://host:port) the Next.js frontend is served from. The browser
 # only talks to Next.js, which proxies /api, /media and /ws to this backend.
@@ -137,10 +145,20 @@ if DATABASE_URL:
         # Persistent connections leak under ASGI; psycopg's pool is the
         # recommended replacement (requires CONN_MAX_AGE = 0, the default).
         # Short timeouts make requests fail fast while the database is down.
+        # Hosted databases (e.g. Neon) suspend when idle and drop open
+        # connections, so each pooled connection is checked before use.
+        from psycopg_pool import ConnectionPool
+
         DATABASES['default'].setdefault('OPTIONS', {}).update(
             {
                 'connect_timeout': 5,
-                'pool': {'min_size': 2, 'max_size': 10, 'timeout': 10},
+                'pool': {
+                    'min_size': 1,
+                    'max_size': 10,
+                    'timeout': 10,
+                    'check': ConnectionPool.check_connection,
+                    'max_idle': 120,
+                },
             }
         )
 else:
@@ -296,6 +314,36 @@ STATIC_ROOT = BASE_DIR / 'staticfiles'
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 FILE_UPLOAD_PERMISSIONS = 0o644
+
+# Hosts with a temporary disk (e.g. Render's free plan) lose local files on
+# every restart: then uploads go to S3-compatible storage (e.g. Cloudflare R2).
+# Files stay private; Django still checks access and streams them.
+S3_BUCKET = env_str('S3_BUCKET')
+STORAGES = {
+    'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'},
+    'staticfiles': {
+        'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage'
+        if DEBUG
+        else 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+    },
+}
+if S3_BUCKET:
+    STORAGES['default'] = {
+        'BACKEND': 'storages.backends.s3.S3Storage',
+        'OPTIONS': {
+            'bucket_name': S3_BUCKET,
+            'endpoint_url': env_str('S3_ENDPOINT_URL') or None,
+            'access_key': env_str('S3_ACCESS_KEY_ID'),
+            'secret_key': env_str('S3_SECRET_ACCESS_KEY'),
+            'region_name': env_str('S3_REGION', 'auto'),
+            # "path" for providers that need it (e.g. Supabase Storage).
+            'addressing_style': env_str('S3_ADDRESSING_STYLE') or None,
+            'signature_version': 's3v4',
+            'default_acl': None,
+            'file_overwrite': False,
+            'querystring_auth': True,
+        },
+    }
 
 
 # ---------------------------------------------------------------------------
