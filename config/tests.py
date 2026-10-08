@@ -8,7 +8,7 @@ class HealthTests(TestCase):
         self.assertEqual(response.status_code, 200)
         body = response.json()
         self.assertEqual(body['status'], 'ok')
-        self.assertEqual(set(body['checks']), {'database', 'cache', 'channel_layer'})
+        self.assertEqual(set(body['checks']), {'database', 'cache', 'channel_layer', 'storage'})
 
     def test_health_only_allows_get(self):
         self.assertEqual(self.client.post('/api/health/', HTTP_X_REQUESTED_WITH='XMLHttpRequest').status_code, 405)

@@ -42,6 +42,25 @@ def _check_channel_layer():
     return {'backend': type(layer).__name__}
 
 
+def _check_storage():
+    from django.core.files.storage import default_storage
+
+    remote = hasattr(default_storage, 'bucket_name')  # also sets up the lazy storage
+    backend = default_storage.__class__.__name__
+    try:
+        if remote:
+            # A listing (unlike HEAD) returns an error body with a precise code.
+            client = default_storage.connection.meta.client
+            client.list_objects_v2(Bucket=default_storage.bucket_name, MaxKeys=1)
+        else:
+            default_storage.exists('health-check')
+    except Exception as exc:
+        # S3 errors carry a safe code such as "SignatureDoesNotMatch" or "NoSuchBucket".
+        code = getattr(exc, 'response', {}).get('Error', {}).get('Code') or type(exc).__name__
+        raise RuntimeError(f'{backend}: {code}') from exc
+    return {'backend': backend}
+
+
 @csrf_exempt  # read-only; lets require_GET answer other methods with 405
 @never_cache
 @require_GET
@@ -52,11 +71,13 @@ def health(request):
         ('database', _check_database),
         ('cache', _check_cache),
         ('channel_layer', _check_channel_layer),
+        ('storage', _check_storage),
     ):
         try:
             checks[name] = {'ok': True, **check()}
         except Exception as exc:  # noqa: BLE001 - any failure means unhealthy
-            checks[name] = {'ok': False, 'error': str(exc) if settings.DEBUG else 'unavailable'}
+            safe = name == 'storage'  # its message holds only a backend name and an error code
+            checks[name] = {'ok': False, 'error': str(exc) if settings.DEBUG or safe else 'unavailable'}
 
     healthy = all(item['ok'] for item in checks.values())
     return JsonResponse(
